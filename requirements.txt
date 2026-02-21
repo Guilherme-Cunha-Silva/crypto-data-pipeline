@@ -1,0 +1,5 @@
+# Dependências do notebook CASE_2.ipynb
+google-cloud-bigquery
+pandas
+requests
+
