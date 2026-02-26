@@ -1,3 +1,7 @@
+![Python](https://img.shields.io/badge/Python-3.x-blue)
+![BigQuery](https://img.shields.io/badge/BigQuery-GCP-orange)
+![API](https://img.shields.io/badge/API-CoinGecko-green)
+
 # 📊 Crypto Data Pipeline
 
 **CoinGecko API v3 → Google BigQuery → Looker Studio**
@@ -36,8 +40,6 @@ Query SQL → Derivação Top N\
 ↓\
 Market Chart Range (/coins/{id}/market_chart/range)\
 ↓\
-Transformação diária (1 linha por dia)\
-↓\
 BigQuery FACT (Histórico estruturado)\
 ↓\
 Looker Studio
@@ -71,7 +73,7 @@ Essa abordagem é mais robusta do que retry isolado por request.
 
 ------------------------------------------------------------------------
 
-## 3️⃣ Camada RAW (Data Lake Pattern)
+## 3️⃣ Camada RAW
 
 O snapshot é salvo completo como JSON:
 
@@ -82,7 +84,6 @@ O snapshot é salvo completo como JSON:
 Benefícios:
 
 -   Reprocessamento possível\
--   Auditoria\
 -   Versionamento por execução
 
 ------------------------------------------------------------------------
@@ -98,20 +99,6 @@ A partir do último snapshot:
 -   Seleção dinâmica de TOP_N
 
 Demonstra modelagem SQL sobre JSON bruto.
-
-------------------------------------------------------------------------
-
-## 5️⃣ Feature Engineering Diário
-
-A API retorna múltiplos pontos por dia.
-
-O pipeline:
-
--   Ordena por timestamp\
--   Agrupa por date\
--   Seleciona o último ponto do dia
-
-Resultado: 1 linha por ativo por dia, pronta para BI.
 
 ------------------------------------------------------------------------
 
@@ -180,10 +167,8 @@ export BQ_DATASET_ID="..."
 -   Stage + MERGE (UPSERT) em produção\
 -   Particionamento por date\
 -   Clusterização por crypto_id\
--   Orquestração (Airflow / Composer)\
--   Incremental load por watermark\
+-   Orquestração\
 -   Monitoramento e alertas\
--   Camadas SILVER e GOLD
 
 ------------------------------------------------------------------------
 
@@ -197,4 +182,4 @@ export BQ_DATASET_ID="..."
 
 ------------------------------------------------------------------------
 
-Desenvolvido com foco em boas práticas de Engenharia de Dados.
+Desenvolvido com foco em boas práticas de Dados.
