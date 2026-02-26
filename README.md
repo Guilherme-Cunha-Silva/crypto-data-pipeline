@@ -1,182 +1,200 @@
-![Python](https://img.shields.io/badge/Python-3.x-blue)
-![BigQuery](https://img.shields.io/badge/BigQuery-GCP-orange)
-![API](https://img.shields.io/badge/API-CoinGecko-green)
-
 # 📊 Crypto Data Pipeline
 
-**CoinGecko API v3 → Google BigQuery**
-
-Este projeto implementa um pipeline de dados simples, reprodutível e
-escalável para ingestão e modelagem de dados de criptomoedas utilizando
-a API da CoinGecko (v3) e o Google BigQuery como Data Warehouse.
+**CoinGecko API v3 → Google BigQuery → Looker Studio**
 
 ------------------------------------------------------------------------
 
-## 🎯 Objetivo
+# 🎯 Visão Estratégica
 
-Construir um pipeline que:
+Este projeto demonstra a construção de um pipeline de dados resiliente,
+escalável e orientado a boas práticas de Engenharia de Dados.
 
-1.  📥 Coleta um snapshot de mercado via endpoint `/coins/markets`
-2.  💾 Persiste o payload bruto em uma tabela RAW no BigQuery
-3.  🏆 Deriva o Top N ativos por variação de preço nas últimas 24h (indicador pode ser variável)	
-4.  📈 Coleta o histórico diário de preços via
-    `/coins/{id}/market_chart/range`
-5.  📊 Persiste os dados históricos em uma tabela FACT
+Mais do que apenas consumir uma API, o objetivo foi evidenciar:
+
+-   ✔️ Resiliência a Rate Limit (429)
+-   ✔️ Retry com Backoff Exponencial
+-   ✔️ Throttle Global Compartilhado
+-   ✔️ Arquitetura em Camadas (RAW → FACT)
+-   ✔️ Modelagem SQL sobre JSON
+-   ✔️ Preparação para ambiente produtivo
+
+O pipeline foi projetado para funcionar com a API pública da CoinGecko,
+respeitando suas limitações, e preparado para evoluir para um cenário
+PRO ou produtivo com billing habilitado.
 
 ------------------------------------------------------------------------
 
-## 🏗️ Arquitetura do Pipeline
+# 🏗️ Arquitetura do Pipeline
 
 CoinGecko API\
 ↓\
 Snapshot Markets (/coins/markets)\
 ↓\
-BigQuery RAW (JSON)\
+BigQuery RAW (JSON versionado)\
 ↓\
-Query Top N por Market Cap\
+Query SQL → Derivação Top N\
 ↓\
 Market Chart Range (/coins/{id}/market_chart/range)\
 ↓\
-BigQuery FACT (Histórico Diário)
+Transformação diária (1 linha por dia)\
 ↓\
-Looker Studio (data viz)
+BigQuery FACT (Histórico estruturado)\
+↓\
+Looker Studio
 
 ------------------------------------------------------------------------
 
-## 🧰 Tecnologias Utilizadas
+# 🧠 Decisões Técnicas Relevantes
 
--   Python 3.x
--   Requests
--   Pandas
--   Google Cloud BigQuery
--   CoinGecko API (Public)
+## 1️⃣ Retry + Backoff Exponencial
 
-------------------------------------------------------------------------
+A função `http_get_json()` implementa:
 
-## ⚙️ Configuração do Ambiente
+-   Retry automático para 429 e 5xx\
+-   Backoff exponencial (2\^tentativa)\
+-   Tratamento explícito para 401/403
 
-### 1️⃣ Instalar dependências (fora do colab)
-
-``` bash
-pip install google-cloud-bigquery requests python-dotenv
-```
+Isso garante resiliência mesmo em ambiente com limitações da API
+pública.
 
 ------------------------------------------------------------------------
 
-### 2️⃣ Variáveis de Ambiente
+## 2️⃣ Throttle Compartilhado entre Moedas
 
-``` bash
-export COINGECKO_API_KEY="..."      # Opcional (necessário para PRO)
-export COINGECKO_IS_PRO="0"         # "1" para PRO | "0" para Public
-export GCP_PROJECT_ID="..."
-export BQ_DATASET_ID="..."
-```
+Na coleta histórica:
 
-------------------------------------------------------------------------
+-   O timestamp da última chamada é compartilhado globalmente\
+-   Evita rajadas de requisições\
+-   Reduz drasticamente erros 429
 
-## 🔄 Etapas do Pipeline
-
-### 🔹 1. Setup
-
--   Importação de bibliotecas
--   Configuração de variáveis
--   Inicialização do cliente BigQuery
+Essa abordagem é mais robusta do que retry isolado por request.
 
 ------------------------------------------------------------------------
 
-### 🔹 2. Funções Utilitárias
+## 3️⃣ Camada RAW (Data Lake Pattern)
 
-Implementação de:
-
-    -   `http_get_json()`
-    -   Retry exponencial\
-    -   Tratamento de erros HTTP (429, 5xx)\
-    -   Controle de rate limit
-
-------------------------------------------------------------------------
-
-### 🔹 3. Criação da Tabela RAW
-
-Tabela destinada a armazenar o snapshot bruto da API.
-
-Campos principais:
+O snapshot é salvo completo como JSON:
 
 -   ingestion_timestamp (TIMESTAMP)\
 -   source (STRING)\
 -   payload (JSON)
 
-------------------------------------------------------------------------
+Benefícios:
 
-### 🔹 4. Coleta do Snapshot de Mercado
-
-Endpoint utilizado:
-
-GET /coins/markets
-
-Características:
-
--   Paginação controlada\
--   Controle de intervalo entre chamadas\
--   Compatível com API Public
+-   Reprocessamento possível\
+-   Auditoria\
+-   Versionamento por execução
 
 ------------------------------------------------------------------------
 
-### 🔹 5. Derivação do Top N por Market Cap
+## 4️⃣ Derivação do Top N
 
-A partir do último snapshot ingerido na RAW:
+A partir do último snapshot:
 
--   Ordenação por price_change_percentage_24h_in_currency\
--   Seleção dos Top N ativos\
--   Preparação para coleta histórica
+-   Explosão do JSON via UNNEST\
+-   Uso de JSON_VALUE\
+-   SAFE_CAST para robustez\
+-   Ordenação por indicador escolhido\
+-   Seleção dinâmica de TOP_N
 
-------------------------------------------------------------------------
-
-### 🔹 6. Coleta de Histórico Diário
-
-Endpoint utilizado:
-
-GET /coins/{id}/market_chart/range
-
-Coleta:
-
--   Preço\
--   Market Cap\
--   Volume
+Demonstra modelagem SQL sobre JSON bruto.
 
 ------------------------------------------------------------------------
 
-### 🔹 7. Persistência na Tabela FACT
+## 5️⃣ Feature Engineering Diário
 
-Campos típicos:
+A API retorna múltiplos pontos por dia.
+
+O pipeline:
+
+-   Ordena por timestamp\
+-   Agrupa por date\
+-   Seleciona o último ponto do dia
+
+Resultado: 1 linha por ativo por dia, pronta para BI.
+
+------------------------------------------------------------------------
+
+# 🧰 Tecnologias Utilizadas
+
+-   Python 3.x\
+-   Requests\
+-   Pandas\
+-   Google Cloud BigQuery\
+-   CoinGecko API v3\
+-   Looker Studio
+
+------------------------------------------------------------------------
+
+# ⚙️ Tutorial de Execução
+
+## 1️⃣ Instalação
+
+``` bash
+pip install google-cloud-bigquery requests python-dotenv pandas
+```
+
+------------------------------------------------------------------------
+
+## 2️⃣ Variáveis de Ambiente
+
+``` bash
+export COINGECKO_API_KEY="..."   
+export COINGECKO_IS_PRO="0"      
+export GCP_PROJECT_ID="..."  
+export BQ_DATASET_ID="..."  
+```
+
+------------------------------------------------------------------------
+
+## 3️⃣ Execução
+
+1.  Execute o notebook célula a célula\
+2.  Valide a criação da tabela RAW\
+3.  Verifique a derivação do Top N\
+4.  Confirme a carga da tabela FACT\
+5.  Conecte ao Looker Studio
+
+------------------------------------------------------------------------
+
+# 📊 Estrutura das Tabelas
+
+## RAW
+
+-   ingestion_timestamp (TIMESTAMP)\
+-   source (STRING)\
+-   payload (JSON)
+
+## FACT
 
 -   crypto_id (STRING)\
 -   date (DATE)\
--   price (FLOAT)\
--   market_cap (FLOAT)\
--   volume (FLOAT)\
+-   price_usd (FLOAT)\
+-   market_cap_usd (FLOAT)\
+-   volume_usd (FLOAT)
 
 ------------------------------------------------------------------------
 
-## 📈 Possíveis Evoluções
+# 🚀 Evoluções Futuras
 
--   Orquestração com software desejado\
--   Incremental load\
+-   Stage + MERGE (UPSERT) em produção\
+-   Particionamento por date\
+-   Clusterização por crypto_id\
+-   Orquestração (Airflow / Composer)\
+-   Incremental load por watermark\
 -   Monitoramento e alertas\
--   Camadas RAW → SILVER → GOLD\
+-   Camadas SILVER e GOLD
 
 ------------------------------------------------------------------------
 
-## 🚀 Como Executar
+# 📌 Resultado Final
 
-1.  Configure as variáveis de ambiente\
-2.  Execute o notebook célula a célula\
-3.  Verifique as tabelas no BigQuery\
-4.  Valide os dados ingeridos
+-   Snapshot versionado na RAW\
+-   Histórico estruturado na FACT\
+-   Pipeline resiliente a rate limit\
+-   Base pronta para análises e dashboards\
+-   Estrutura preparada para evolução produtiva
 
 ------------------------------------------------------------------------
 
-## 📌 Resultado Esperado
-
--   Snapshot bruto versionado na camada RAW\
--   Histórico estruturado na camada FACT\
--   Base pronta para análises e dashboards
+Desenvolvido com foco em boas práticas de Engenharia de Dados.
